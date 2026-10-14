@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$ROOT/build"
 STAGING_DIR="$BUILD_DIR/dmg"
-DMG_PATH="$BUILD_DIR/Keyviz-1.1.0-beta.2.dmg"
+DMG_PATH="$BUILD_DIR/Keyviz-1.1.0-beta.3.dmg"
 
 "$ROOT/Scripts/build-app.sh"
 

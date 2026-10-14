@@ -1,8 +1,9 @@
 import AppKit
-import ApplicationServices
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private static let versionTitle = "Version 1.1.0 Beta 3"
+
     private let preferences = OverlayPreferences()
     private lazy var overlayController = OverlayWindowController(preferences: preferences)
     private lazy var keySelectionController = KeySelectionWindowController(
@@ -19,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureStatusItem()
         startLocalMonitoring()
-        requestAccessibilityIfNeeded()
+        requestInputMonitoringIfNeeded()
         refreshGlobalMonitoring()
         overlayController.reloadKeys()
     }
@@ -75,17 +76,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
 
         let permissions = NSMenuItem(
-            title: AXIsProcessTrusted()
-                ? "Accessibility Access Granted"
-                : "Grant Accessibility Access…",
-            action: AXIsProcessTrusted() ? nil : #selector(openAccessibilitySettings),
+            title: CGPreflightListenEventAccess()
+                ? "Input Monitoring Access Granted"
+                : "Grant Input Monitoring Access…",
+            action: CGPreflightListenEventAccess()
+                ? nil
+                : #selector(openInputMonitoringSettings),
             keyEquivalent: ""
         )
         permissions.target = self
-        permissions.state = AXIsProcessTrusted() ? .on : .off
+        permissions.state = CGPreflightListenEventAccess() ? .on : .off
         menu.addItem(permissions)
 
         menu.addItem(.separator())
+        let version = NSMenuItem(
+            title: Self.versionTitle,
+            action: nil,
+            keyEquivalent: ""
+        )
+        version.isEnabled = false
+        menu.addItem(version)
         let quit = NSMenuItem(
             title: "Quit Keyviz",
             action: #selector(NSApplication.terminate(_:)),
@@ -188,7 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func refreshGlobalMonitoring() {
-        guard AXIsProcessTrusted() else {
+        guard CGPreflightListenEventAccess() else {
             beginPermissionPolling()
             return
         }
@@ -229,12 +239,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         overlayController.setPressed(isPressed, keyCode: event.keyCode)
     }
 
-    private func requestAccessibilityIfNeeded() {
-        guard !AXIsProcessTrusted() else { return }
-        let options = [
-            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
-        ] as CFDictionary
-        AXIsProcessTrustedWithOptions(options)
+    private func requestInputMonitoringIfNeeded() {
+        guard !CGPreflightListenEventAccess() else { return }
+        CGRequestListenEventAccess()
     }
 
     @objc private func toggleEnabled(_ sender: NSMenuItem) {
@@ -287,11 +294,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem?.menu = makeMenu()
     }
 
-    @objc private func openAccessibilitySettings() {
-        requestAccessibilityIfNeeded()
+    @objc private func openInputMonitoringSettings() {
+        requestInputMonitoringIfNeeded()
         beginPermissionPolling()
         guard let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
         ) else { return }
         NSWorkspace.shared.open(url)
     }
