@@ -47,7 +47,7 @@ final class KeySelectionWindowController: NSWindowController {
         heading.font = .systemFont(ofSize: 20, weight: .semibold)
 
         let detail = NSTextField(
-            wrappingLabelWithString: "Click the capture area, then press a key to add it. Press it again to remove it."
+            wrappingLabelWithString: "Click the capture area, then press a key to add it. Press it again to remove it. Changes are saved instantly."
         )
         detail.textColor = .secondaryLabelColor
 
@@ -128,6 +128,7 @@ final class KeySelectionWindowController: NSWindowController {
             NSSound.beep()
         }
         updateSelectedLabel()
+        saveSelection()
     }
 
     private func updateSelectedLabel() {
@@ -139,13 +140,17 @@ final class KeySelectionWindowController: NSWindowController {
     @objc private func clearSelection() {
         selectedKeys.removeAll()
         updateSelectedLabel()
+        saveSelection()
         window?.makeFirstResponder(captureView)
     }
 
     @objc private func saveAndClose() {
+        close()
+    }
+
+    private func saveSelection() {
         preferences.selectedKeys = selectedKeys
         onChange()
-        close()
     }
 }
 

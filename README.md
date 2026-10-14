@@ -29,7 +29,9 @@ Because release builds are currently ad-hoc signed, macOS may require you to
 right-click Keyviz and select **Open** the first time.
 
 Choose **Displayed Keys → Customize Keys…** from the menu bar to select the
-keys that remain visible. Selected boxes brighten while their keys are held.
+keys that remain visible. Changes are saved immediately, and closing the
+chooser leaves Keyviz running in the menu bar. Selected boxes brighten while
+their keys are held, including while you work in other apps.
 
 Keyviz observes keyboard events only to update the overlay. It does not
 store or transmit keystrokes.

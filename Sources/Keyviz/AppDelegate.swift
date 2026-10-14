@@ -14,21 +14,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var globalMonitor: Any?
     private var localMonitor: Any?
+    private var permissionTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureStatusItem()
-        startMonitoring()
-        overlayController.reloadKeys()
+        startLocalMonitoring()
         requestAccessibilityIfNeeded()
+        refreshGlobalMonitoring()
+        overlayController.reloadKeys()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        permissionTimer?.invalidate()
         if let globalMonitor {
             NSEvent.removeMonitor(globalMonitor)
         }
         if let localMonitor {
             NSEvent.removeMonitor(localMonitor)
         }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        refreshGlobalMonitoring()
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 
     private func configureStatusItem() {
@@ -64,11 +75,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
 
         let permissions = NSMenuItem(
-            title: "Open Accessibility Settings…",
-            action: #selector(openAccessibilitySettings),
+            title: AXIsProcessTrusted()
+                ? "Accessibility Access Granted"
+                : "Grant Accessibility Access…",
+            action: AXIsProcessTrusted() ? nil : #selector(openAccessibilitySettings),
             keyEquivalent: ""
         )
         permissions.target = self
+        permissions.state = AXIsProcessTrusted() ? .on : .off
         menu.addItem(permissions)
 
         menu.addItem(.separator())
@@ -164,18 +178,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return menu
     }
 
-    private func startMonitoring() {
+    private func startLocalMonitoring() {
         let eventMask: NSEvent.EventTypeMask = [.keyDown, .keyUp, .flagsChanged]
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: eventMask) {
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: eventMask) {
+            [weak self] event in
+            self?.handle(event)
+            return event
+        }
+    }
+
+    private func refreshGlobalMonitoring() {
+        guard AXIsProcessTrusted() else {
+            beginPermissionPolling()
+            return
+        }
+        permissionTimer?.invalidate()
+        permissionTimer = nil
+        guard globalMonitor == nil else { return }
+
+        let eventMask: NSEvent.EventTypeMask = [.keyDown, .keyUp, .flagsChanged]
+        let monitor = NSEvent.addGlobalMonitorForEvents(matching: eventMask) {
             [weak self] event in
             Task { @MainActor in
                 self?.handle(event)
             }
         }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: eventMask) {
-            [weak self] event in
-            self?.handle(event)
-            return event
+        globalMonitor = monitor
+        guard monitor != nil else {
+            beginPermissionPolling()
+            return
+        }
+        refreshMenu()
+    }
+
+    private func beginPermissionPolling() {
+        guard permissionTimer == nil else { return }
+        permissionTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) {
+            [weak self] _ in
+            Task { @MainActor in
+                self?.refreshGlobalMonitoring()
+            }
         }
     }
 
@@ -246,6 +288,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openAccessibilitySettings() {
+        requestAccessibilityIfNeeded()
+        beginPermissionPolling()
         guard let url = URL(
             string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
         ) else { return }
