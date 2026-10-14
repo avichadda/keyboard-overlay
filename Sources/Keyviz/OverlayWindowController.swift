@@ -2,15 +2,10 @@ import AppKit
 
 @MainActor
 final class OverlayWindowController: NSWindowController {
-    private struct Entry {
-        let id: UUID
-        let view: NSView
-        let timer: Timer
-    }
-
     private let preferences: OverlayPreferences
     private let stackView = NSStackView()
-    private var entries: [Entry] = []
+    private var keyViews: [UInt16: NSView] = [:]
+    private var pressedKeyCodes = Set<UInt16>()
 
     init(preferences: OverlayPreferences) {
         self.preferences = preferences
@@ -38,40 +33,53 @@ final class OverlayWindowController: NSWindowController {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func show(labels: [String]) {
-        guard preferences.isEnabled, !labels.isEmpty else { return }
-
-        for label in labels {
-            addKey(label)
+    func reloadKeys() {
+        stackView.arrangedSubviews.forEach {
+            stackView.removeArrangedSubview($0)
+            $0.removeFromSuperview()
         }
+        keyViews.removeAll()
+        pressedKeyCodes.removeAll()
 
-        while entries.count > 7 {
-            removeEntry(id: entries[0].id, animated: false)
+        for key in preferences.selectedKeys {
+            let keyView = makeKeyView(label: key.label)
+            keyViews[key.keyCode] = keyView
+            stackView.addArrangedSubview(keyView)
         }
-
         updateWindow(animated: true)
     }
 
+    func setPressed(_ isPressed: Bool, keyCode: UInt16) {
+        guard let view = keyViews[keyCode], preferences.isEnabled else { return }
+        if isPressed {
+            pressedKeyCodes.insert(keyCode)
+        } else {
+            pressedKeyCodes.remove(keyCode)
+        }
+        applyAppearance(to: view, pressed: isPressed, animated: true)
+    }
+
     func refreshAppearance() {
-        for entry in entries {
-            applyAppearance(to: entry.view)
+        for (keyCode, view) in keyViews {
+            applyAppearance(
+                to: view,
+                pressed: pressedKeyCodes.contains(keyCode),
+                animated: false
+            )
         }
         updateWindow(animated: false)
     }
 
-    func clear() {
-        for entry in entries {
-            entry.timer.invalidate()
-            stackView.removeArrangedSubview(entry.view)
-            entry.view.removeFromSuperview()
+    func setVisible(_ isVisible: Bool) {
+        if isVisible {
+            reloadKeys()
+        } else {
+            window?.orderOut(nil)
         }
-        entries.removeAll()
-        window?.orderOut(nil)
     }
 
     private func configureContent() {
         guard let panel = window as? NSPanel else { return }
-
         stackView.orientation = .horizontal
         stackView.alignment = .centerY
         stackView.spacing = 10
@@ -79,30 +87,14 @@ final class OverlayWindowController: NSWindowController {
         panel.contentView = stackView
     }
 
-    private func addKey(_ label: String) {
-        let id = UUID()
-        let keyView = makeKeyView(label: label)
-        stackView.addArrangedSubview(keyView)
-
-        let timer = Timer.scheduledTimer(
-            withTimeInterval: preferences.displayDuration,
-            repeats: false
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.removeEntry(id: id, animated: true)
-            }
-        }
-        entries.append(Entry(id: id, view: keyView, timer: timer))
-    }
-
     private func makeKeyView(label: String) -> NSView {
         let container = NSView()
         container.wantsLayer = true
         container.layer?.cornerRadius = 15
-        container.layer?.masksToBounds = true
+        container.layer?.masksToBounds = false
 
         let text = NSTextField(labelWithString: label)
-        text.font = .systemFont(ofSize: label.count > 3 ? 22 : 34, weight: .semibold)
+        text.font = .systemFont(ofSize: label.count > 3 ? 20 : 32, weight: .semibold)
         text.textColor = .white
         text.alignment = .center
         text.translatesAutoresizingMaskIntoConstraints = false
@@ -118,42 +110,48 @@ final class OverlayWindowController: NSWindowController {
             text.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -12)
         ])
 
-        applyAppearance(to: container)
+        applyAppearance(to: container, pressed: false, animated: false)
         return container
     }
 
-    private func applyAppearance(to view: NSView) {
-        view.layer?.backgroundColor = preferences.color.nsColor
-            .withAlphaComponent(preferences.opacity)
-            .cgColor
-    }
+    private func applyAppearance(to view: NSView, pressed: Bool, animated: Bool) {
+        let color = pressed
+            ? preferences.color.nsColor.blended(withFraction: 0.38, of: .white)
+                ?? preferences.color.nsColor
+            : preferences.color.nsColor
+        let alpha: CGFloat = pressed ? 1 : preferences.opacity
 
-    private func removeEntry(id: UUID, animated: Bool) {
-        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        let entry = entries.remove(at: index)
-        entry.timer.invalidate()
-
-        let completion = { [weak self] in
-            self?.stackView.removeArrangedSubview(entry.view)
-            entry.view.removeFromSuperview()
-            self?.updateWindow(animated: true)
+        let changes = {
+            view.layer?.backgroundColor = color.withAlphaComponent(alpha).cgColor
+            view.layer?.borderColor = NSColor.white
+                .withAlphaComponent(pressed ? 0.95 : 0.2)
+                .cgColor
+            view.layer?.borderWidth = pressed ? 3 : 1
+            view.layer?.shadowColor = NSColor.black.cgColor
+            view.layer?.shadowOpacity = pressed ? 0.45 : 0.18
+            view.layer?.shadowRadius = pressed ? 10 : 4
+            view.layer?.shadowOffset = NSSize(width: 0, height: -2)
+            view.layer?.setAffineTransform(
+                pressed
+                    ? CGAffineTransform(scaleX: 1.08, y: 1.08)
+                    : .identity
+            )
         }
 
         if animated {
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.16
-                entry.view.animator().alphaValue = 0
-            } completionHandler: {
-                Task { @MainActor in completion() }
+                context.duration = 0.08
+                context.allowsImplicitAnimation = true
+                changes()
             }
         } else {
-            completion()
+            changes()
         }
     }
 
     private func updateWindow(animated: Bool) {
         guard let window else { return }
-        guard !entries.isEmpty else {
+        guard preferences.isEnabled, !keyViews.isEmpty else {
             window.orderOut(nil)
             return
         }

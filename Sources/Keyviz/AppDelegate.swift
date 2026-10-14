@@ -5,6 +5,12 @@ import ApplicationServices
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let preferences = OverlayPreferences()
     private lazy var overlayController = OverlayWindowController(preferences: preferences)
+    private lazy var keySelectionController = KeySelectionWindowController(
+        preferences: preferences
+    ) { [weak self] in
+        self?.overlayController.reloadKeys()
+        self?.refreshMenu()
+    }
     private var statusItem: NSStatusItem?
     private var globalMonitor: Any?
     private var localMonitor: Any?
@@ -12,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureStatusItem()
         startMonitoring()
+        overlayController.reloadKeys()
         requestAccessibilityIfNeeded()
     }
 
@@ -50,10 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(enabled)
         menu.addItem(.separator())
 
+        menu.addItem(submenuItem(title: "Displayed Keys", menu: displayedKeysMenu()))
         menu.addItem(submenuItem(title: "Opacity", menu: opacityMenu()))
         menu.addItem(submenuItem(title: "Color", menu: colorMenu()))
         menu.addItem(submenuItem(title: "Position", menu: positionMenu()))
-        menu.addItem(submenuItem(title: "Display Time", menu: durationMenu()))
         menu.addItem(.separator())
 
         let permissions = NSMenuItem(
@@ -96,6 +103,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return menu
     }
 
+    private func displayedKeysMenu() -> NSMenu {
+        let menu = NSMenu(title: "Displayed Keys")
+        let presets: [(String, [KeyDefinition])] = [
+            ("WASD", KeyDefinition.wasd),
+            ("Arrow Keys", KeyDefinition.arrows),
+            ("WASD + Arrow Keys", KeyDefinition.wasdAndArrows)
+        ]
+        for (index, preset) in presets.enumerated() {
+            let item = NSMenuItem(
+                title: preset.0,
+                action: #selector(selectKeyPreset(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.tag = index
+            item.state = preferences.selectedKeys == preset.1 ? .on : .off
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let customize = NSMenuItem(
+            title: "Customize Keys…",
+            action: #selector(customizeKeys),
+            keyEquivalent: ""
+        )
+        customize.target = self
+        menu.addItem(customize)
+        return menu
+    }
+
     private func colorMenu() -> NSMenu {
         let menu = NSMenu(title: "Color")
         for (index, color) in OverlayColor.choices.enumerated() {
@@ -128,30 +164,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return menu
     }
 
-    private func durationMenu() -> NSMenu {
-        let menu = NSMenu(title: "Display Time")
-        for (index, duration) in [0.6, 1.0, 1.5, 2.5].enumerated() {
-            let item = NSMenuItem(
-                title: "\(duration.formatted()) seconds",
-                action: #selector(setDuration(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.tag = index
-            item.state = abs(preferences.displayDuration - duration) < 0.01 ? .on : .off
-            menu.addItem(item)
-        }
-        return menu
-    }
-
     private func startMonitoring() {
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) {
+        let eventMask: NSEvent.EventTypeMask = [.keyDown, .keyUp, .flagsChanged]
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: eventMask) {
             [weak self] event in
             Task { @MainActor in
                 self?.handle(event)
             }
         }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: eventMask) {
             [weak self] event in
             self?.handle(event)
             return event
@@ -160,7 +181,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func handle(_ event: NSEvent) {
         guard !event.isARepeat else { return }
-        overlayController.show(labels: KeyFormatter.labels(for: event))
+        let isPressed = event.type == .flagsChanged
+            ? KeyFormatter.isModifierPressed(event: event)
+            : event.type == .keyDown
+        overlayController.setPressed(isPressed, keyCode: event.keyCode)
     }
 
     private func requestAccessibilityIfNeeded() {
@@ -174,9 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleEnabled(_ sender: NSMenuItem) {
         preferences.isEnabled.toggle()
         sender.state = preferences.isEnabled ? .on : .off
-        if !preferences.isEnabled {
-            overlayController.clear()
-        }
+        overlayController.setVisible(preferences.isEnabled)
     }
 
     @objc private func setOpacity(_ sender: NSMenuItem) {
@@ -199,15 +221,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         overlayController.refreshAppearance()
     }
 
-    @objc private func setDuration(_ sender: NSMenuItem) {
-        let durations = [0.6, 1.0, 1.5, 2.5]
-        guard durations.indices.contains(sender.tag) else { return }
-        preferences.displayDuration = durations[sender.tag]
+    @objc private func selectKeyPreset(_ sender: NSMenuItem) {
+        let presets = [
+            KeyDefinition.wasd,
+            KeyDefinition.arrows,
+            KeyDefinition.wasdAndArrows
+        ]
+        guard presets.indices.contains(sender.tag) else { return }
+        preferences.selectedKeys = presets[sender.tag]
         select(sender)
+        overlayController.reloadKeys()
+    }
+
+    @objc private func customizeKeys() {
+        keySelectionController.present()
     }
 
     private func select(_ sender: NSMenuItem) {
         sender.menu?.items.forEach { $0.state = $0 === sender ? .on : .off }
+    }
+
+    private func refreshMenu() {
+        statusItem?.menu = makeMenu()
     }
 
     @objc private func openAccessibilitySettings() {

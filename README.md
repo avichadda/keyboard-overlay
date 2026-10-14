@@ -9,15 +9,18 @@ recordings, presentations, and tutorials.
 ## Features
 
 - Native AppKit app with no third-party dependencies
-- Global keystroke overlay across apps, Spaces, and full-screen windows
-- Configurable opacity, color, screen position, and display time
+- Persistent keys that highlight while they are pressed
+- WASD, arrow-key, and combined presets
+- Custom selection of up to 12 keys
+- Global key state across apps, Spaces, and full-screen windows
+- Configurable opacity, color, and screen position
 - Click-through overlay that never steals focus
 - Remembers your preferences
 - Runs only in the menu bar
 
 ## Install
 
-1. Download and open `Keyviz-1.0.0.dmg`.
+1. Download and open `Keyviz-1.1.0-beta.dmg`.
 2. Drag **Keyviz** to **Applications**.
 3. Open Keyviz and grant Accessibility access when macOS asks.
 4. Use the keyboard icon in the menu bar to customize the overlay.
@@ -25,7 +28,10 @@ recordings, presentations, and tutorials.
 Because release builds are currently ad-hoc signed, macOS may require you to
 right-click Keyviz and select **Open** the first time.
 
-Keyviz observes keyboard events only to render them on screen. It does not
+Choose **Displayed Keys → Customize Keys…** from the menu bar to select the
+keys that remain visible. Selected boxes brighten while their keys are held.
+
+Keyviz observes keyboard events only to update the overlay. It does not
 store or transmit keystrokes.
 
 ## Build

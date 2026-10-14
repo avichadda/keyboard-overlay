@@ -9,6 +9,7 @@ cd "$ROOT"
 swift build
 swiftc \
     -parse-as-library \
+    "Sources/Keyviz/OverlayPreferences.swift" \
     "Sources/Keyviz/KeyFormatter.swift" \
     "Tests/KeyvizTests/KeyFormatterTests.swift" \
     -o "$TEST_BINARY"

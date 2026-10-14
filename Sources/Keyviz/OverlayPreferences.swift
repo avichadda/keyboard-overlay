@@ -1,5 +1,26 @@
 import AppKit
 
+struct KeyDefinition: Codable, Hashable {
+    let keyCode: UInt16
+    let label: String
+
+    static let wasd = [
+        KeyDefinition(keyCode: 13, label: "W"),
+        KeyDefinition(keyCode: 0, label: "A"),
+        KeyDefinition(keyCode: 1, label: "S"),
+        KeyDefinition(keyCode: 2, label: "D")
+    ]
+
+    static let arrows = [
+        KeyDefinition(keyCode: 123, label: "←"),
+        KeyDefinition(keyCode: 125, label: "↓"),
+        KeyDefinition(keyCode: 126, label: "↑"),
+        KeyDefinition(keyCode: 124, label: "→")
+    ]
+
+    static let wasdAndArrows = wasd + arrows
+}
+
 enum OverlayPosition: String, CaseIterable {
     case topLeft
     case topCenter
@@ -46,7 +67,7 @@ final class OverlayPreferences {
         static let opacity = "overlay.opacity"
         static let colorName = "overlay.colorName"
         static let position = "overlay.position"
-        static let displayDuration = "overlay.displayDuration"
+        static let selectedKeys = "overlay.selectedKeys"
     }
 
     private let defaults: UserDefaults
@@ -57,8 +78,7 @@ final class OverlayPreferences {
             Key.isEnabled: true,
             Key.opacity: 0.85,
             Key.colorName: OverlayColor.choices[0].name,
-            Key.position: OverlayPosition.bottomCenter.rawValue,
-            Key.displayDuration: 1.5
+            Key.position: OverlayPosition.bottomCenter.rawValue
         ])
     }
 
@@ -88,8 +108,25 @@ final class OverlayPreferences {
         set { defaults.set(newValue.rawValue, forKey: Key.position) }
     }
 
-    var displayDuration: TimeInterval {
-        get { defaults.double(forKey: Key.displayDuration) }
-        set { defaults.set(min(max(newValue, 0.4), 5), forKey: Key.displayDuration) }
+    var selectedKeys: [KeyDefinition] {
+        get {
+            guard
+                let data = defaults.data(forKey: Key.selectedKeys),
+                let keys = try? JSONDecoder().decode([KeyDefinition].self, from: data)
+            else {
+                return KeyDefinition.wasd
+            }
+            return Array(keys.prefix(12))
+        }
+        set {
+            let uniqueKeys = newValue.reduce(into: [KeyDefinition]()) { result, key in
+                guard !result.contains(where: { $0.keyCode == key.keyCode }) else { return }
+                result.append(key)
+            }
+            guard let data = try? JSONEncoder().encode(Array(uniqueKeys.prefix(12))) else {
+                return
+            }
+            defaults.set(data, forKey: Key.selectedKeys)
+        }
     }
 }
