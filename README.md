@@ -23,8 +23,8 @@ recordings, presentations, and tutorials.
 1. Download and open `Keyviz-1.1.0-beta.dmg`.
 2. Drag **Keyviz** to **Applications**.
 3. Quit any older Keyviz version that is still running in the menu bar.
-4. Open Keyviz and grant Input Monitoring access when macOS asks.
-5. Confirm the Keyviz menu shows **Input Monitoring Access Granted**.
+4. Open Keyviz and grant keyboard access when macOS asks.
+5. Confirm the Keyviz menu shows **Global Key Listener Active**.
 6. Use the keyboard icon in the menu bar to customize the overlay.
 
 Because release builds are currently ad-hoc signed, macOS may require you to
@@ -36,9 +36,10 @@ chooser leaves Keyviz running in the menu bar. Selected boxes brighten while
 their keys are held, including while you work in other apps.
 
 macOS requires Input Monitoring permission to deliver keystrokes from other
-apps. Accessibility permission by itself is not sufficient. If an older
-Keyviz build is already running during an upgrade, quit it from the keyboard
-menu before opening the new version.
+apps. Keyviz shows **Global Key Listener Active** only after that permission is
+granted and its native event tap is running. If an older Keyviz build is
+already running during an upgrade, quit it from the keyboard menu before
+opening the new version.
 
 Keyviz observes keyboard events only to update the overlay. It does not
 store or transmit keystrokes.

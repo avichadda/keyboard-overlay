@@ -27,5 +27,5 @@ done
 iconutil -c icns "$ICONSET_DIR" -o "$CONTENTS_DIR/Resources/AppIcon.icns"
 rm -rf "$ICONSET_DIR"
 
-codesign --force --deep --sign - "$APP_DIR"
+codesign --force --deep --sign "${KEYVIZ_SIGNING_IDENTITY:--}" "$APP_DIR"
 echo "Built $APP_DIR"

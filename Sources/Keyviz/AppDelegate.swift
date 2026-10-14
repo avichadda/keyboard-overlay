@@ -1,8 +1,31 @@
 import AppKit
 
+private func keyEventTapCallback(
+    proxy: CGEventTapProxy,
+    type: CGEventType,
+    event: CGEvent,
+    userInfo: UnsafeMutableRawPointer?
+) -> Unmanaged<CGEvent>? {
+    guard let userInfo else {
+        return Unmanaged.passUnretained(event)
+    }
+    let delegate = Unmanaged<AppDelegate>.fromOpaque(userInfo).takeUnretainedValue()
+
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        Task { @MainActor in
+            delegate.enableEventTap()
+        }
+    } else if let keyEvent = NSEvent(cgEvent: event) {
+        Task { @MainActor in
+            delegate.handle(keyEvent)
+        }
+    }
+    return Unmanaged.passUnretained(event)
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private static let versionTitle = "Version 1.1.0 Beta 3"
+    private static let versionTitle = "Version 1.1.0 Beta 8"
 
     private let preferences = OverlayPreferences()
     private lazy var overlayController = OverlayWindowController(preferences: preferences)
@@ -13,22 +36,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self?.refreshMenu()
     }
     private var statusItem: NSStatusItem?
-    private var globalMonitor: Any?
+    private var eventTap: CFMachPort?
+    private var eventTapSource: CFRunLoopSource?
     private var localMonitor: Any?
     private var permissionTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureStatusItem()
         startLocalMonitoring()
-        requestInputMonitoringIfNeeded()
+        requestGlobalInputAccessIfNeeded()
         refreshGlobalMonitoring()
         overlayController.reloadKeys()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         permissionTimer?.invalidate()
-        if let globalMonitor {
-            NSEvent.removeMonitor(globalMonitor)
+        if let eventTapSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), eventTapSource, .commonModes)
+        }
+        if let eventTap {
+            CFMachPortInvalidate(eventTap)
         }
         if let localMonitor {
             NSEvent.removeMonitor(localMonitor)
@@ -76,16 +103,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
 
         let permissions = NSMenuItem(
-            title: CGPreflightListenEventAccess()
-                ? "Input Monitoring Access Granted"
-                : "Grant Input Monitoring Access…",
-            action: CGPreflightListenEventAccess()
+            title: eventTap != nil
+                ? "Global Key Listener Active"
+                : "Grant Keyboard Access…",
+            action: eventTap != nil
                 ? nil
-                : #selector(openInputMonitoringSettings),
+                : #selector(openKeyboardAccessSettings),
             keyEquivalent: ""
         )
         permissions.target = self
-        permissions.state = CGPreflightListenEventAccess() ? .on : .off
+        permissions.state = eventTap != nil ? .on : .off
         menu.addItem(permissions)
 
         menu.addItem(.separator())
@@ -198,27 +225,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func refreshGlobalMonitoring() {
-        guard CGPreflightListenEventAccess() else {
+        guard hasGlobalInputAccess else {
             beginPermissionPolling()
             return
         }
         permissionTimer?.invalidate()
         permissionTimer = nil
-        guard globalMonitor == nil else { return }
-
-        let eventMask: NSEvent.EventTypeMask = [.keyDown, .keyUp, .flagsChanged]
-        let monitor = NSEvent.addGlobalMonitorForEvents(matching: eventMask) {
-            [weak self] event in
-            Task { @MainActor in
-                self?.handle(event)
-            }
+        guard eventTap == nil else {
+            enableEventTap()
+            return
         }
-        globalMonitor = monitor
-        guard monitor != nil else {
+
+        let eventMask =
+            (CGEventMask(1) << CGEventType.keyDown.rawValue)
+            | (CGEventMask(1) << CGEventType.keyUp.rawValue)
+            | (CGEventMask(1) << CGEventType.flagsChanged.rawValue)
+        let userInfo = Unmanaged.passUnretained(self).toOpaque()
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: eventMask,
+            callback: keyEventTapCallback,
+            userInfo: userInfo
+        ) else {
             beginPermissionPolling()
             return
         }
+
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        eventTap = tap
+        eventTapSource = source
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
         refreshMenu()
+    }
+
+    func enableEventTap() {
+        guard let eventTap else { return }
+        CGEvent.tapEnable(tap: eventTap, enable: true)
     }
 
     private func beginPermissionPolling() {
@@ -231,7 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func handle(_ event: NSEvent) {
+    func handle(_ event: NSEvent) {
         guard !event.isARepeat else { return }
         let isPressed = event.type == .flagsChanged
             ? KeyFormatter.isModifierPressed(event: event)
@@ -239,8 +284,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         overlayController.setPressed(isPressed, keyCode: event.keyCode)
     }
 
-    private func requestInputMonitoringIfNeeded() {
-        guard !CGPreflightListenEventAccess() else { return }
+    private var hasGlobalInputAccess: Bool {
+        CGPreflightListenEventAccess()
+    }
+
+    private func requestGlobalInputAccessIfNeeded() {
+        guard !hasGlobalInputAccess else { return }
         CGRequestListenEventAccess()
     }
 
@@ -294,8 +343,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem?.menu = makeMenu()
     }
 
-    @objc private func openInputMonitoringSettings() {
-        requestInputMonitoringIfNeeded()
+    @objc private func openKeyboardAccessSettings() {
+        requestGlobalInputAccessIfNeeded()
         beginPermissionPolling()
         guard let url = URL(
             string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
